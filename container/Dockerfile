@@ -3,6 +3,9 @@
 
 FROM node:22-slim
 
+# Use China mirrors for apt
+RUN sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list.d/debian.sources || sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
+
 # Install system dependencies for Chromium
 RUN apt-get update && apt-get install -y \
     chromium \

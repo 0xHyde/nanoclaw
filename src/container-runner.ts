@@ -30,6 +30,25 @@ import { RegisteredGroup } from './types.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
+// Load environment variables from .env file if they exist
+function loadEnvFile(): Record<string, string> {
+  const env: Record<string, string> = {};
+  const envPath = path.join(process.cwd(), '.env');
+  if (fs.existsSync(envPath)) {
+    const content = fs.readFileSync(envPath, 'utf-8');
+    for (const line of content.split('\n')) {
+      const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+      if (match) {
+        const [, key, value] = match;
+        // Remove quotes if present
+        env[key] = value.replace(/^["']|["']$/g, '');
+      }
+    }
+  }
+  return env;
+}
+const dotEnv = loadEnvFile();
+
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
@@ -233,19 +252,38 @@ async function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // OneCLI gateway handles credential injection — containers never see real secrets.
-  // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
-  const onecliApplied = await onecli.applyContainerConfig(args, {
-    addHostMapping: false, // Nanoclaw already handles host gateway
-    agent: agentIdentifier,
-  });
-  if (onecliApplied) {
-    logger.info({ containerName }, 'OneCLI gateway config applied');
+  // Check if using custom Anthropic-compatible API (e.g., Kimi)
+  const anthropicBaseUrl = dotEnv.ANTHROPIC_BASE_URL || process.env.ANTHROPIC_BASE_URL;
+  const anthropicApiKey = dotEnv.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
+  const useCustomApi = !!anthropicBaseUrl && !!anthropicApiKey;
+
+  // OneCLI gateway handles credential injection for official Anthropic API.
+  // Skip OneCLI if using custom third-party API to avoid conflicts.
+  let onecliApplied = false;
+  if (!useCustomApi) {
+    onecliApplied = await onecli.applyContainerConfig(args, {
+      addHostMapping: false,
+      agent: agentIdentifier,
+    });
+    if (onecliApplied) {
+      logger.info({ containerName }, 'OneCLI gateway config applied');
+    } else {
+      logger.warn(
+        { containerName },
+        'OneCLI gateway not reachable — container will have no credentials',
+      );
+    }
   } else {
-    logger.warn(
-      { containerName },
-      'OneCLI gateway not reachable — container will have no credentials',
-    );
+    logger.info({ containerName }, 'Using custom API endpoint, skipping OneCLI');
+  }
+
+  // Pass API configuration for third-party providers (e.g., Kimi)
+  if (anthropicBaseUrl) {
+    args.push('-e', `ANTHROPIC_BASE_URL=${anthropicBaseUrl}`);
+  }
+  if (anthropicApiKey) {
+    args.push('-e', `ANTHROPIC_API_KEY=${anthropicApiKey}`);
+    args.push('-e', `CLAUDE_CODE_OAUTH_TOKEN=${anthropicApiKey}`);
   }
 
   // Runtime-specific args for host gateway resolution
