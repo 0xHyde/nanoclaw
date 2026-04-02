@@ -19,7 +19,10 @@ export function formatMessages(
     let xml = `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${escapeXml(m.content)}`;
     if (m.media && m.media.length > 0) {
       const containerPaths = m.media.map((p) =>
-        p.replace(/^.*[\/\\]data[\/\\]media[\/\\]feishu[\/\\]/, '/workspace/media/feishu/'),
+        p.replace(
+          /^.*[\/\\]data[\/\\]media[\/\\]feishu[\/\\]/,
+          '/workspace/media/feishu/',
+        ),
       );
       xml += `\n<attachments>\n${containerPaths.map((p) => `  <file path="${escapeXml(p)}" />`).join('\n')}\n</attachments>`;
     }

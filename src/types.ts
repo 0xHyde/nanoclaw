@@ -96,7 +96,11 @@ export interface Channel {
   /** Channel identifier, e.g. 'feishu', 'whatsapp', 'telegram' */
   readonly name: string;
   connect(): Promise<void>;
-  sendMessage(jid: string, text: string, options?: { replyToMessageId?: string }): Promise<void>;
+  sendMessage(
+    jid: string,
+    text: string,
+    options?: { replyToMessageId?: string },
+  ): Promise<void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;
@@ -107,7 +111,11 @@ export interface Channel {
   // Optional: send emoji reaction to a message (Feishu, Discord, etc.)
   sendReaction?(messageId: string, emoji: string): Promise<void>;
   // Optional: send rich card/interactive message
-  sendCard?(jid: string, card: unknown, options?: { replyToMessageId?: string }): Promise<void>;
+  sendCard?(
+    jid: string,
+    card: unknown,
+    options?: { replyToMessageId?: string },
+  ): Promise<void>;
   // Optional: reply to the last message in a chat
   replyToLastMessage?(jid: string, text: string): Promise<void>;
   // Optional: get last message ID for reply functionality

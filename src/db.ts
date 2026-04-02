@@ -361,7 +361,9 @@ export function getNewMessages(
 
   const rows = db
     .prepare(sql)
-    .all(lastTimestamp, ...jids, `${botPrefix}:%`, limit) as Array<Omit<NewMessage, 'media'> & { media: string | null }>;
+    .all(lastTimestamp, ...jids, `${botPrefix}:%`, limit) as Array<
+    Omit<NewMessage, 'media'> & { media: string | null }
+  >;
 
   const messages: NewMessage[] = rows.map((r) => ({
     ...r,
@@ -398,7 +400,9 @@ export function getMessagesSince(
   `;
   const rows = db
     .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as Array<Omit<NewMessage, 'media'> & { media: string | null }>;
+    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as Array<
+    Omit<NewMessage, 'media'> & { media: string | null }
+  >;
 
   return rows.map((r) => ({
     ...r,

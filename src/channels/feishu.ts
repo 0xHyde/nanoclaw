@@ -33,11 +33,13 @@ export class FeishuChannel implements Channel {
   private mediaDir: string;
 
   // Markdown detection patterns
-  private static _COMPLEX_MD_RE = /```|^\|.+\|\n\s*\|[-:\s|]+\||^#{1,6}\s+|^\s*[-*+]\s+|^\s*\d+\.\s+|\*\*.+?\*\*|__.+?__|(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)|~~.+?~~/m;
+  private static _COMPLEX_MD_RE =
+    /```|^\|.+\|\n\s*\|[-:\s|]+\||^#{1,6}\s+|^\s*[-*+]\s+|^\s*\d+\.\s+|\*\*.+?\*\*|__.+?__|(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)|~~.+?~~/m;
   private static _TEXT_MAX_LEN = 200;
   private static _POST_MAX_LEN = 2000;
   // Match markdown table: header line + separator line + one or more data rows
-  private static _TABLE_RE = /((?:^[ \t]*\|.+\|[ \t]*\n)(?:^[ \t]*\|[-:\s|]+\|[ \t]*\n)(?:^[ \t]*\|.+\|[ \t]*\n?)+)/gm;
+  private static _TABLE_RE =
+    /((?:^[ \t]*\|.+\|[ \t]*\n)(?:^[ \t]*\|[-:\s|]+\|[ \t]*\n)(?:^[ \t]*\|.+\|[ \t]*\n?)+)/gm;
   private static _CODE_BLOCK_RE = /(```[\s\S]*?```)/g;
   private static _HEADING_RE = /^(#{1,6})\s+(.+)$/gm;
 
@@ -66,8 +68,13 @@ export class FeishuChannel implements Channel {
       .replace(/~~(.+?)~~/g, '$1');
   }
 
-  private static parseMdTable(tableText: string): Record<string, unknown> | null {
-    const lines = tableText.split('\n').map((l) => l.trim()).filter(Boolean);
+  private static parseMdTable(
+    tableText: string,
+  ): Record<string, unknown> | null {
+    const lines = tableText
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
     if (lines.length < 3) return null;
     const split = (line: string) =>
       line
@@ -104,7 +111,10 @@ export class FeishuChannel implements Channel {
     let m: RegExpExecArray | null;
     while ((m = FeishuChannel._CODE_BLOCK_RE.exec(content)) !== null) {
       codeBlocks.push(m[1]);
-      protectedContent = protectedContent.replace(m[1], `\x00CODE${codeBlocks.length - 1}\x00`);
+      protectedContent = protectedContent.replace(
+        m[1],
+        `\x00CODE${codeBlocks.length - 1}\x00`,
+      );
     }
 
     const elements: Record<string, unknown>[] = [];
@@ -131,7 +141,10 @@ export class FeishuChannel implements Channel {
     for (let i = 0; i < codeBlocks.length; i++) {
       for (const el of elements) {
         if (el.tag === 'markdown' && typeof el.content === 'string') {
-          el.content = (el.content as string).replace(`\x00CODE${i}\x00`, codeBlocks[i]);
+          el.content = (el.content as string).replace(
+            `\x00CODE${i}\x00`,
+            codeBlocks[i],
+          );
         }
       }
     }
@@ -277,7 +290,11 @@ export class FeishuChannel implements Channel {
 
     // Download media files to local disk
     if (msgType === 'image') {
-      downloadedImagePath = await this.downloadMedia(msgType, msgId, rawContent);
+      downloadedImagePath = await this.downloadMedia(
+        msgType,
+        msgId,
+        rawContent,
+      );
       if (downloadedImagePath) {
         mediaPaths.push(downloadedImagePath);
       }
@@ -413,7 +430,11 @@ export class FeishuChannel implements Channel {
 
   private extractPostText(parsed: any): string {
     // Post (rich text) content has a nested structure: { title, content: [[{tag,text},...], ...] }
-    const lang = parsed.zh_cn || parsed.en_us || parsed.ja_jp || Object.values(parsed)[0] as any;
+    const lang =
+      parsed.zh_cn ||
+      parsed.en_us ||
+      parsed.ja_jp ||
+      (Object.values(parsed)[0] as any);
     if (!lang) return '[Post]';
     const parts: string[] = [];
     if (lang.title) parts.push(lang.title);
@@ -423,7 +444,8 @@ export class FeishuChannel implements Channel {
         for (const node of line) {
           if (node.tag === 'text' && node.text) parts.push(node.text);
           else if (node.tag === 'a' && node.text) parts.push(node.text);
-          else if (node.tag === 'at' && node.user_name) parts.push(`@${node.user_name}`);
+          else if (node.tag === 'at' && node.user_name)
+            parts.push(`@${node.user_name}`);
           else if (node.tag === 'img') parts.push('[Image]');
           else if (node.tag === 'media') parts.push('[Video]');
         }
@@ -598,8 +620,7 @@ export class FeishuChannel implements Channel {
         params: { type: resourceType },
       });
       const fileName =
-        parsed.file_name ||
-        (msgType === 'image' ? `${fileKey}.jpg` : fileKey);
+        parsed.file_name || (msgType === 'image' ? `${fileKey}.jpg` : fileKey);
       const destPath = path.join(this.mediaDir, fileName);
       await resp.writeFile(destPath);
       logger.debug({ msgId, msgType, destPath }, 'Feishu media downloaded');
