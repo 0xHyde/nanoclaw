@@ -16,7 +16,15 @@ export function formatMessages(
 ): string {
   const lines = messages.map((m) => {
     const displayTime = formatLocalTime(m.timestamp, timezone);
-    return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${escapeXml(m.content)}</message>`;
+    let xml = `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${escapeXml(m.content)}`;
+    if (m.media && m.media.length > 0) {
+      const containerPaths = m.media.map((p) =>
+        p.replace(/^.*[\/\\]data[\/\\]media[\/\\]feishu[\/\\]/, '/workspace/media/feishu/'),
+      );
+      xml += `\n<attachments>\n${containerPaths.map((p) => `  <file path="${escapeXml(p)}" />`).join('\n')}\n</attachments>`;
+    }
+    xml += '</message>';
+    return xml;
   });
 
   const header = `<context timezone="${escapeXml(timezone)}" />\n`;

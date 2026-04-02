@@ -62,6 +62,7 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  imageAttachments?: Array<{ relativePath: string; mediaType: string }>;
 }
 
 export interface ContainerOutput {
@@ -229,6 +230,16 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Shared media directory for Feishu downloaded images/files
+  const feishuMediaDir = path.join(DATA_DIR, 'media', 'feishu');
+  if (fs.existsSync(feishuMediaDir)) {
+    mounts.push({
+      hostPath: feishuMediaDir,
+      containerPath: '/workspace/media/feishu',
+      readonly: true,
+    });
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
@@ -253,8 +264,10 @@ async function buildContainerArgs(
   args.push('-e', `TZ=${TIMEZONE}`);
 
   // Check if using custom Anthropic-compatible API (e.g., Kimi)
-  const anthropicBaseUrl = dotEnv.ANTHROPIC_BASE_URL || process.env.ANTHROPIC_BASE_URL;
-  const anthropicApiKey = dotEnv.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
+  const anthropicBaseUrl =
+    dotEnv.ANTHROPIC_BASE_URL || process.env.ANTHROPIC_BASE_URL;
+  const anthropicApiKey =
+    dotEnv.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
   const useCustomApi = !!anthropicBaseUrl && !!anthropicApiKey;
 
   // OneCLI gateway handles credential injection for official Anthropic API.
@@ -274,7 +287,10 @@ async function buildContainerArgs(
       );
     }
   } else {
-    logger.info({ containerName }, 'Using custom API endpoint, skipping OneCLI');
+    logger.info(
+      { containerName },
+      'Using custom API endpoint, skipping OneCLI',
+    );
   }
 
   // Pass API configuration for third-party providers (e.g., Kimi)

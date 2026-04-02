@@ -1,9 +1,13 @@
 import * as Lark from '@larksuiteoapi/node-sdk';
+import fs from 'fs';
+import path from 'path';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { ASSISTANT_NAME, DATA_DIR, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
+import { processImage } from '../image.js';
+import { resolveGroupFolderPath } from '../group-folder.js';
 import {
   Channel,
   OnChatMetadata,
@@ -26,10 +30,172 @@ export class FeishuChannel implements Channel {
   private botOpenId: string = '';
   // Cache chat names to avoid repeated API calls
   private chatNameCache = new Map<string, string>();
+  private mediaDir: string;
+
+  // Markdown detection patterns
+  private static _COMPLEX_MD_RE = /```|^\|.+\|\n\s*\|[-:\s|]+\||^#{1,6}\s+|^\s*[-*+]\s+|^\s*\d+\.\s+|\*\*.+?\*\*|__.+?__|(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)|~~.+?~~/m;
+  private static _TEXT_MAX_LEN = 200;
+  private static _POST_MAX_LEN = 2000;
+  // Match markdown table: header line + separator line + one or more data rows
+  private static _TABLE_RE = /((?:^[ \t]*\|.+\|[ \t]*\n)(?:^[ \t]*\|[-:\s|]+\|[ \t]*\n)(?:^[ \t]*\|.+\|[ \t]*\n?)+)/gm;
+  private static _CODE_BLOCK_RE = /(```[\s\S]*?```)/g;
+  private static _HEADING_RE = /^(#{1,6})\s+(.+)$/gm;
 
   constructor(appId: string, appSecret: string, opts: FeishuChannelOpts) {
     this.client = new Lark.Client({ appId, appSecret });
     this.opts = opts;
+    this.mediaDir = path.join(DATA_DIR, 'media', 'feishu');
+    fs.mkdirSync(this.mediaDir, { recursive: true });
+  }
+
+  /**
+   * Determine if content needs an interactive card or can be sent as plain text.
+   */
+  static detectMsgFormat(content: string): 'text' | 'interactive' {
+    const stripped = content.trim();
+    if (FeishuChannel._COMPLEX_MD_RE.test(stripped)) return 'interactive';
+    if (stripped.length > FeishuChannel._POST_MAX_LEN) return 'interactive';
+    return 'text';
+  }
+
+  private static stripMdFormatting(text: string): string {
+    return text
+      .replace(/\*\*(.+?)\*\*/g, '$1')
+      .replace(/__(.+?)__/g, '$1')
+      .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '$1')
+      .replace(/~~(.+?)~~/g, '$1');
+  }
+
+  private static parseMdTable(tableText: string): Record<string, unknown> | null {
+    const lines = tableText.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (lines.length < 3) return null;
+    const split = (line: string) =>
+      line
+        .replace(/^\|/, '')
+        .replace(/\|$/, '')
+        .split('|')
+        .map((c) => FeishuChannel.stripMdFormatting(c.trim()));
+    const headers = split(lines[0]);
+    const rows = lines.slice(2).map(split);
+    const columns = headers.map((h, i) => ({
+      tag: 'column',
+      name: `c${i}`,
+      display_name: h,
+      width: 'auto',
+    }));
+    return {
+      tag: 'table',
+      page_size: rows.length + 1,
+      columns,
+      rows: rows.map((r) => {
+        const obj: Record<string, string> = {};
+        for (let i = 0; i < headers.length; i++) {
+          obj[`c${i}`] = r[i] || '';
+        }
+        return obj;
+      }),
+    };
+  }
+
+  private static splitHeadings(content: string): Record<string, unknown>[] {
+    const codeBlocks: string[] = [];
+    let protectedContent = content;
+    FeishuChannel._CODE_BLOCK_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = FeishuChannel._CODE_BLOCK_RE.exec(content)) !== null) {
+      codeBlocks.push(m[1]);
+      protectedContent = protectedContent.replace(m[1], `\x00CODE${codeBlocks.length - 1}\x00`);
+    }
+
+    const elements: Record<string, unknown>[] = [];
+    let lastEnd = 0;
+    FeishuChannel._HEADING_RE.lastIndex = 0;
+    while ((m = FeishuChannel._HEADING_RE.exec(protectedContent)) !== null) {
+      const before = protectedContent.slice(lastEnd, m.index).trim();
+      if (before) {
+        elements.push({ tag: 'markdown', content: before });
+      }
+      const text = FeishuChannel.stripMdFormatting(m[2].trim());
+      elements.push({
+        tag: 'div',
+        text: { tag: 'lark_md', content: text ? `**${text}**` : '' },
+      });
+      lastEnd = m.index + m[0].length;
+    }
+
+    const remaining = protectedContent.slice(lastEnd).trim();
+    if (remaining) {
+      elements.push({ tag: 'markdown', content: remaining });
+    }
+
+    for (let i = 0; i < codeBlocks.length; i++) {
+      for (const el of elements) {
+        if (el.tag === 'markdown' && typeof el.content === 'string') {
+          el.content = (el.content as string).replace(`\x00CODE${i}\x00`, codeBlocks[i]);
+        }
+      }
+    }
+
+    return elements.length > 0 ? elements : [{ tag: 'markdown', content }];
+  }
+
+  private static buildCardElements(content: string): Record<string, unknown>[] {
+    const elements: Record<string, unknown>[] = [];
+    let lastIndex = 0;
+
+    FeishuChannel._TABLE_RE.lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = FeishuChannel._TABLE_RE.exec(content)) !== null) {
+      const before = content.slice(lastIndex, match.index).trim();
+      if (before) {
+        elements.push(...FeishuChannel.splitHeadings(before));
+      }
+      const table = FeishuChannel.parseMdTable(match[1]);
+      if (table) {
+        elements.push(table);
+      } else {
+        elements.push(...FeishuChannel.splitHeadings(match[1]));
+      }
+      lastIndex = match.index + match[0].length;
+    }
+
+    const remaining = content.slice(lastIndex).trim();
+    if (remaining) {
+      elements.push(...FeishuChannel.splitHeadings(remaining));
+    }
+
+    return elements.length > 0 ? elements : [{ tag: 'markdown', content }];
+  }
+
+  private static splitElementsByTableLimit(
+    elements: Record<string, unknown>[],
+    maxTables = 1,
+  ): Record<string, unknown>[][] {
+    if (elements.length === 0) return [[]];
+    const groups: Record<string, unknown>[][] = [];
+    let current: Record<string, unknown>[] = [];
+    let tableCount = 0;
+
+    for (const el of elements) {
+      if (el.tag === 'table') {
+        if (tableCount >= maxTables && current.length > 0) {
+          groups.push(current);
+          current = [];
+          tableCount = 0;
+        }
+        current.push(el);
+        tableCount++;
+      } else {
+        current.push(el);
+      }
+    }
+
+    if (current.length > 0) {
+      groups.push(current);
+    }
+
+    return groups.length > 0 ? groups : [[]];
   }
 
   async connect(): Promise<void> {
@@ -85,6 +251,12 @@ export class FeishuChannel implements Channel {
       ? new Date(parseInt(createTime, 10)).toISOString()
       : new Date().toISOString();
 
+    // Add reaction (best-effort)
+    const groupForReaction = this.opts.registeredGroups()[chatJid];
+    const reactEmoji =
+      groupForReaction?.channelConfig?.feishu?.reactEmoji || 'THUMBSUP';
+    this.sendReaction(msgId, reactEmoji).catch(() => {});
+
     // Extract sender info
     const senderId = data.sender?.sender_id?.open_id || '';
     const senderName = await this.getSenderName(data.sender, mentions);
@@ -100,6 +272,22 @@ export class FeishuChannel implements Channel {
 
     // Build content from message type
     let content = this.extractContent(msgType, rawContent, mentions);
+    const mediaPaths: string[] = [];
+    let downloadedImagePath: string | null = null;
+
+    // Download media files to local disk
+    if (msgType === 'image') {
+      downloadedImagePath = await this.downloadMedia(msgType, msgId, rawContent);
+      if (downloadedImagePath) {
+        mediaPaths.push(downloadedImagePath);
+      }
+    } else if (['audio', 'file', 'media'].includes(msgType)) {
+      const savedPath = await this.downloadMedia(msgType, msgId, rawContent);
+      if (savedPath) {
+        mediaPaths.push(savedPath);
+        content += `\n[${msgType}: ${savedPath}]`;
+      }
+    }
 
     // Check for /chatid and /ping commands (text messages starting with /)
     if (msgType === 'text' && content.startsWith('/')) {
@@ -140,6 +328,23 @@ export class FeishuChannel implements Channel {
       return;
     }
 
+    // For images in registered groups, resize and copy to group attachments for vision
+    if (msgType === 'image' && downloadedImagePath) {
+      try {
+        const groupDir = resolveGroupFolderPath(group.folder);
+        const buffer = fs.readFileSync(downloadedImagePath);
+        const processed = await processImage(buffer, groupDir);
+        if (processed) {
+          content += `\n${processed.content}`;
+        } else {
+          content += `\n[image: ${downloadedImagePath}]`;
+        }
+      } catch (err) {
+        logger.warn({ err, msgId }, 'Failed to process image for vision');
+        content += `\n[image: ${downloadedImagePath}]`;
+      }
+    }
+
     // Deliver message
     this.opts.onMessage(chatJid, {
       id: msgId,
@@ -149,6 +354,7 @@ export class FeishuChannel implements Channel {
       content,
       timestamp,
       is_from_me: false,
+      media: mediaPaths,
     });
 
     logger.info(
@@ -267,25 +473,143 @@ export class FeishuChannel implements Channel {
     return chatId;
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    options?: { replyToMessageId?: string },
+  ): Promise<void> {
     if (!this.wsClient) {
       logger.warn('Feishu bot not initialized');
       return;
     }
 
+    const fmt = FeishuChannel.detectMsgFormat(text);
+    if (fmt === 'interactive') {
+      await this.sendCard(jid, text, options);
+      return;
+    }
+
     try {
-      const chatId = jid.replace(/^feishu:/, '');
-      await this.client.im.v1.message.create({
-        params: { receive_id_type: 'chat_id' },
-        data: {
-          receive_id: chatId,
-          content: JSON.stringify({ text }),
-          msg_type: 'text',
-        },
-      });
+      if (options?.replyToMessageId) {
+        await this.client.im.v1.message.reply({
+          path: { message_id: options.replyToMessageId },
+          data: {
+            content: JSON.stringify({ text }),
+            msg_type: 'text',
+          },
+        });
+      } else {
+        const chatId = jid.replace(/^feishu:/, '');
+        await this.client.im.v1.message.create({
+          params: { receive_id_type: 'chat_id' },
+          data: {
+            receive_id: chatId,
+            content: JSON.stringify({ text }),
+            msg_type: 'text',
+          },
+        });
+      }
       logger.info({ jid, length: text.length }, 'Feishu message sent');
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Feishu message');
+    }
+  }
+
+  async sendCard(
+    jid: string,
+    text: string,
+    options?: { replyToMessageId?: string },
+  ): Promise<void> {
+    if (!this.wsClient) {
+      logger.warn('Feishu bot not initialized');
+      return;
+    }
+
+    const elements = FeishuChannel.buildCardElements(text);
+    const groups = FeishuChannel.splitElementsByTableLimit(elements);
+
+    try {
+      for (const chunk of groups) {
+        const card = { config: { wide_screen_mode: true }, elements: chunk };
+        const content = JSON.stringify(card);
+
+        if (options?.replyToMessageId) {
+          await this.client.im.v1.message.reply({
+            path: { message_id: options.replyToMessageId },
+            data: {
+              content,
+              msg_type: 'interactive',
+            },
+          });
+        } else {
+          const chatId = jid.replace(/^feishu:/, '');
+          await this.client.im.v1.message.create({
+            params: { receive_id_type: 'chat_id' },
+            data: {
+              receive_id: chatId,
+              content,
+              msg_type: 'interactive',
+            },
+          });
+        }
+      }
+      logger.info(
+        { jid, chunks: groups.length, length: text.length },
+        'Feishu card sent',
+      );
+    } catch (err) {
+      logger.error({ jid, err }, 'Failed to send Feishu card');
+    }
+  }
+
+  async sendReaction(messageId: string, emoji: string): Promise<void> {
+    try {
+      await this.client.im.v1.messageReaction.create({
+        path: { message_id: messageId },
+        data: {
+          reaction_type: { emoji_type: emoji },
+        },
+      });
+      logger.debug({ messageId, emoji }, 'Feishu reaction added');
+    } catch (err) {
+      logger.warn({ err, messageId, emoji }, 'Failed to add Feishu reaction');
+    }
+  }
+
+  private async downloadMedia(
+    msgType: string,
+    msgId: string,
+    rawContent: string,
+  ): Promise<string | null> {
+    let parsed: any;
+    try {
+      parsed = JSON.parse(rawContent);
+    } catch {
+      return null;
+    }
+
+    const fileKey = parsed.file_key || parsed.image_key;
+    if (!fileKey) return null;
+
+    const resourceType = msgType === 'image' ? 'image' : 'file';
+    try {
+      const resp = await this.client.im.v1.messageResource.get({
+        path: { message_id: msgId, file_key: fileKey },
+        params: { type: resourceType },
+      });
+      const fileName =
+        parsed.file_name ||
+        (msgType === 'image' ? `${fileKey}.jpg` : fileKey);
+      const destPath = path.join(this.mediaDir, fileName);
+      await resp.writeFile(destPath);
+      logger.debug({ msgId, msgType, destPath }, 'Feishu media downloaded');
+      return destPath;
+    } catch (err) {
+      logger.warn(
+        { err, msgId, msgType, fileKey },
+        'Failed to download Feishu media',
+      );
+      return null;
     }
   }
 

@@ -32,6 +32,13 @@ export interface ContainerConfig {
   timeout?: number; // Default: 300000 (5 minutes)
 }
 
+export interface FeishuConfig {
+  // Auto-add reaction emoji when receiving a message (e.g., "THUMBSUP", "OK")
+  reactEmoji?: string;
+  // Auto-quote reply to user's message
+  replyToMessage?: boolean;
+}
+
 export interface RegisteredGroup {
   name: string;
   folder: string;
@@ -40,6 +47,10 @@ export interface RegisteredGroup {
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
+  // Channel-specific config (e.g., feishu settings)
+  channelConfig?: {
+    feishu?: FeishuConfig;
+  };
 }
 
 export interface NewMessage {
@@ -51,6 +62,7 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  media?: string[];
 }
 
 export interface ScheduledTask {
@@ -81,9 +93,10 @@ export interface TaskRunLog {
 // --- Channel abstraction ---
 
 export interface Channel {
-  name: string;
+  /** Channel identifier, e.g. 'feishu', 'whatsapp', 'telegram' */
+  readonly name: string;
   connect(): Promise<void>;
-  sendMessage(jid: string, text: string): Promise<void>;
+  sendMessage(jid: string, text: string, options?: { replyToMessageId?: string }): Promise<void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;
@@ -91,6 +104,14 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  // Optional: send emoji reaction to a message (Feishu, Discord, etc.)
+  sendReaction?(messageId: string, emoji: string): Promise<void>;
+  // Optional: send rich card/interactive message
+  sendCard?(jid: string, card: unknown, options?: { replyToMessageId?: string }): Promise<void>;
+  // Optional: reply to the last message in a chat
+  replyToLastMessage?(jid: string, text: string): Promise<void>;
+  // Optional: get last message ID for reply functionality
+  getLastMessageId?(jid: string): string | undefined;
 }
 
 // Callback type that channels use to deliver inbound messages
