@@ -16,6 +16,7 @@ import {
   ONECLI_URL,
   TIMEZONE,
 } from './config.js';
+import { MEMORY_API_PORT, MEMORY_HOST_GATEWAY } from './memory/config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -314,6 +315,10 @@ async function buildContainerArgs(
     args.push('--user', `${hostUid}:${hostGid}`);
     args.push('-e', 'HOME=/home/node');
   }
+
+  // Memory API gateway for container skills
+  args.push('-e', `MEMORY_API_HOST=${MEMORY_HOST_GATEWAY}`);
+  args.push('-e', `MEMORY_API_PORT=${MEMORY_API_PORT}`);
 
   for (const mount of mounts) {
     if (mount.readonly) {

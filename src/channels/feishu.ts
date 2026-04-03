@@ -429,13 +429,22 @@ export class FeishuChannel implements Channel {
   }
 
   private extractPostText(parsed: any): string {
-    // Post (rich text) content has a nested structure: { title, content: [[{tag,text},...], ...] }
-    const lang =
-      parsed.zh_cn ||
-      parsed.en_us ||
-      parsed.ja_jp ||
-      (Object.values(parsed)[0] as any);
-    if (!lang) return '[Post]';
+    // Post (rich text) content has a nested structure:
+    // - Direct: { title, content: [[{tag,text},...], ...] }
+    // - Localized: { zh_cn: { title, content } }
+    // - Wrapped: { post: { zh_cn: { title, content } } }
+
+    // Handle wrapped { post: {...} }
+    if (parsed.post && typeof parsed.post === 'object') {
+      parsed = parsed.post;
+    }
+
+    // If parsed has content directly, use it (direct format)
+    // Otherwise try localized formats
+    const lang = parsed.content
+      ? parsed
+      : parsed.zh_cn || parsed.en_us || parsed.ja_jp || Object.values(parsed)[0];
+    if (!lang || typeof lang !== 'object') return '[Post]';
     const parts: string[] = [];
     if (lang.title) parts.push(lang.title);
     if (Array.isArray(lang.content)) {

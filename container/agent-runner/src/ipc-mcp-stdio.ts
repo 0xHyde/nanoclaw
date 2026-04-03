@@ -39,6 +39,176 @@ const server = new McpServer({
   version: '1.0.0',
 });
 
+const MEMORY_API_HOST = process.env.MEMORY_API_HOST || 'host.docker.internal';
+const MEMORY_API_PORT = process.env.MEMORY_API_PORT || '12752';
+const MEMORY_API_BASE = `http://${MEMORY_API_HOST}:${MEMORY_API_PORT}`;
+
+async function memoryFetch(path: string, body: unknown): Promise<string> {
+  const res = await fetch(`${MEMORY_API_BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Memory API error ${res.status}: ${text}`);
+  }
+  const data = (await res.json()) as {
+    memories?: string | null;
+    id?: string;
+    ok?: boolean;
+    error?: string;
+    memories_list?: unknown[];
+    total?: number;
+    byScope?: Record<string, number>;
+  };
+  if (data.error) throw new Error(data.error);
+  return JSON.stringify(data);
+}
+
+server.tool(
+  'memory_recall',
+  'Recall relevant information from long-term memory. Use this when the user refers to something from a previous conversation, or when you need to remember a user preference, project fact, or prior decision.',
+  { query: z.string().describe('The search query') },
+  async (args) => {
+    try {
+      const text = await memoryFetch('/memory/recall', {
+        query: args.query,
+        groupFolder,
+      });
+      const parsed = JSON.parse(text) as { memories: string | null };
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              parsed.memories ||
+              'No relevant memories found for this query.',
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Memory recall failed: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'memory_store',
+  'Store a fact, preference, or context into long-term memory so it can be recalled in future conversations.',
+  {
+    content: z.string().describe('The memory content to store'),
+    scope: z
+      .string()
+      .optional()
+      .describe('Scope identifier (e.g. "global", "group:{folder}"). Defaults to the current group scope.'),
+    importance: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe('Importance from 0 to 1. Higher values rank better in recall.'),
+  },
+  async (args) => {
+    try {
+      const scope = args.scope || `group:${groupFolder}`;
+      const text = await memoryFetch('/memory/store', {
+        content: args.content,
+        scope,
+        groupFolder,
+        importance: args.importance ?? 0.5,
+      });
+      const parsed = JSON.parse(text) as { id: string };
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Stored memory ${parsed.id}.`,
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Memory store failed: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'memory_forget',
+  'Delete a memory from long-term memory by its ID.',
+  { id: z.string().describe('The memory ID to delete') },
+  async (args) => {
+    try {
+      await memoryFetch('/memory/forget', { id: args.id });
+      return {
+        content: [{ type: 'text' as const, text: `Memory ${args.id} deleted.` }],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Memory delete failed: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'memory_update',
+  'Update an existing memory in long-term memory.',
+  {
+    id: z.string().describe('The memory ID'),
+    content: z.string().describe('New content'),
+    scope: z.string().optional().describe('New scope (optional)'),
+  },
+  async (args) => {
+    try {
+      const scope = args.scope || `group:${groupFolder}`;
+      await memoryFetch('/memory/update', {
+        id: args.id,
+        content: args.content,
+        scope,
+        groupFolder,
+      });
+      return {
+        content: [
+          { type: 'text' as const, text: `Memory ${args.id} updated.` },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Memory update failed: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
 server.tool(
   'send_message',
   "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",

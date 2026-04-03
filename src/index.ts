@@ -61,11 +61,29 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
-import { extractSessionCommand, handleSessionCommand, isSessionCommandAllowed } from './session-commands.js';
+import {
+  extractSessionCommand,
+  handleSessionCommand,
+  isSessionCommandAllowed,
+} from './session-commands.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { parseImageReferences } from './image.js';
 import { logger } from './logger.js';
+import {
+  MEMORY_ENABLED,
+  MEMORY_API_PORT,
+  MEMORY_CLEANUP_INTERVAL_MS,
+} from './memory/config.js';
+import {
+  initStore,
+  recall,
+  recallDetails,
+  capture,
+  boostMemories,
+  cleanupMemories,
+} from './memory/engine.js';
+import { startMemoryApiServer } from './memory/api.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -249,18 +267,28 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     timezone: TIMEZONE,
     deps: {
       sendMessage: (text) => channel.sendMessage(chatJid, text),
-      setTyping: (typing) => channel.setTyping?.(chatJid, typing) ?? Promise.resolve(),
-      runAgent: (prompt, onOutput) => runAgent(group, prompt, chatJid, [], onOutput),
+      setTyping: (typing) =>
+        channel.setTyping?.(chatJid, typing) ?? Promise.resolve(),
+      runAgent: (prompt, onOutput) =>
+        runAgent(group, prompt, chatJid, [], onOutput),
       closeStdin: () => queue.closeStdin(chatJid),
-      advanceCursor: (ts) => { lastAgentTimestamp[chatJid] = ts; saveState(); },
+      advanceCursor: (ts) => {
+        lastAgentTimestamp[chatJid] = ts;
+        saveState();
+      },
       formatMessages,
       canSenderInteract: (msg) => {
-        const hasTrigger = getTriggerPattern(group.trigger).test(msg.content.trim());
+        const hasTrigger = getTriggerPattern(group.trigger).test(
+          msg.content.trim(),
+        );
         const reqTrigger = !isMainGroup && group.requiresTrigger !== false;
-        return isMainGroup || !reqTrigger || (hasTrigger && (
-          msg.is_from_me ||
-          isTriggerAllowed(chatJid, msg.sender, loadSenderAllowlist())
-        ));
+        return (
+          isMainGroup ||
+          !reqTrigger ||
+          (hasTrigger &&
+            (msg.is_from_me ||
+              isTriggerAllowed(chatJid, msg.sender, loadSenderAllowlist())))
+        );
       },
     },
   });
@@ -283,6 +311,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
   const imageAttachments = parseImageReferences(missedMessages);
+
+  // --- Memory recall ---
+  let enrichedPrompt = prompt;
+  let assistantOutput = '';
+  let recalledIds: string[] = [];
+  if (MEMORY_ENABLED) {
+    const { text: memories, ids } = await recallDetails(prompt, group.folder);
+    recalledIds = ids;
+    if (memories) {
+      enrichedPrompt = `${memories}\n\n${prompt}`;
+    }
+  }
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -316,7 +356,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const output = await runAgent(
     group,
-    prompt,
+    enrichedPrompt,
     chatJid,
     imageAttachments,
     async (result) => {
@@ -332,6 +372,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         if (text) {
           await channel.sendMessage(chatJid, text);
           outputSentToUser = true;
+          assistantOutput += (assistantOutput ? '\n' : '') + text;
           // Only reset idle timer on actual results, not session-update markers (result: null)
           resetIdleTimer();
         }
@@ -349,6 +390,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
+
+  if (MEMORY_ENABLED && output !== 'error' && !hadError && assistantOutput) {
+    await capture(missedMessages, group.folder, assistantOutput);
+    if (recalledIds.length > 0) {
+      boostMemories(recalledIds).catch((err) =>
+        logger.warn({ err }, 'Boost memory importance failed'),
+      );
+    }
+  }
 
   if (output === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
@@ -528,14 +578,23 @@ async function startMessageLoop(): Promise<void> {
           // --- Session command interception (message loop) ---
           // Scan ALL messages in the batch for a session command.
           const loopCmdMsg = groupMessages.find(
-            (m) => extractSessionCommand(m.content, getTriggerPattern(group.trigger)) !== null,
+            (m) =>
+              extractSessionCommand(
+                m.content,
+                getTriggerPattern(group.trigger),
+              ) !== null,
           );
 
           if (loopCmdMsg) {
             // Only close active container if the sender is authorized — otherwise an
             // untrusted user could kill in-flight work by sending /compact (DoS).
             // closeStdin no-ops internally when no container is active.
-            if (isSessionCommandAllowed(isMainGroup, loopCmdMsg.is_from_me === true)) {
+            if (
+              isSessionCommandAllowed(
+                isMainGroup,
+                loopCmdMsg.is_from_me === true,
+              )
+            ) {
               queue.closeStdin(chatJid);
             }
             // Enqueue so processGroupMessages handles auth + cursor advancement.
@@ -575,7 +634,16 @@ async function startMessageLoop(): Promise<void> {
             allPending.length > 0 ? allPending : groupMessages;
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
-          if (queue.sendMessage(chatJid, formatted)) {
+          // --- Incremental memory recall for piped messages ---
+          let pipedText = formatted;
+          if (MEMORY_ENABLED) {
+            const memories = await recall(formatted, group.folder);
+            if (memories) {
+              pipedText = `${memories}\n\n${formatted}`;
+            }
+          }
+
+          if (queue.sendMessage(chatJid, pipedText)) {
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
@@ -633,6 +701,17 @@ async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
+
+  if (MEMORY_ENABLED) {
+    await initStore();
+    startMemoryApiServer(MEMORY_API_PORT);
+    setInterval(() => {
+      cleanupMemories().catch((err) =>
+        logger.warn({ err }, 'Memory cleanup interval failed'),
+      );
+    }, MEMORY_CLEANUP_INTERVAL_MS);
+  }
+
   loadState();
 
   // Ensure OneCLI agents exist for all registered groups.

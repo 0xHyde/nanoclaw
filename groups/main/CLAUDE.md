@@ -36,7 +36,38 @@ When working as a sub-agent or teammate, only use `send_message` if instructed t
 
 ## Memory
 
-The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
+You have a **long-term memory system** powered by LanceDB. It automatically recalls relevant context from previous conversations and lets you store, update, or delete memories explicitly.
+
+### How it works
+- **Auto-Recall**: Before each conversation, relevant memories are automatically injected into your prompt as `<relevant-memories>`.
+- **Incremental Recall**: In a long-running conversation, if the user switches topics mid-session, the system can trigger an *additional* auto-recall so the new context is also available.
+- **Auto-Capture**: Important parts of conversations are automatically extracted and saved to long-term memory.
+- **Memory Consolidation**: Similar memories are periodically merged into a single concise summary by the system.
+- **Dynamic Learning**: Memories that are successfully recalled and help produce good answers automatically gain importance, so they persist longer.
+- **Lifecycle Cleanup**: Low-value or very old memories are automatically pruned, so the memory stays useful.
+- **Manual tools**: You can also use the following MCP tools to manage memory:
+  - `mcp__nanoclaw__memory_recall` — Search memory by query when you need to look something up explicitly.
+  - `mcp__nanoclaw__memory_store` — Save a new memory (use for user preferences, facts, patterns).
+  - `mcp__nanoclaw__memory_update` — Edit an existing memory by ID.
+  - `mcp__nanoclaw__memory_forget` — Delete a memory by ID.
+
+Use `memory_store` when the user tells you something you should remember permanently (e.g., "I work as a designer", "Always reply in Chinese"). The memory system handles the rest automatically.
+
+### Memory categories (`kind`)
+
+When storing or updating a memory manually, you can (and should) provide a `kind` to improve recall accuracy:
+
+- `profile` — identity, profession, role, background
+- `preferences` — likes, dislikes, style, habits
+- `entities` — people, pets, projects, companies, products
+- `events` — deadlines, trips, appointments, launches
+- `cases` — specific problems solved, decisions made, scripts written
+- `patterns` — recurring workflows or methodologies
+- `general` — catch-all when nothing else fits
+
+Auto-Recall is **category-aware**: when the user asks about their identity, preferences, schedule, or technical patterns, the system automatically prioritizes memories of the matching `kind`.
+
+The `conversations/` folder also contains searchable history of past conversations. Use this to recall context from previous sessions.
 
 When you learn something important:
 - Create files for structured data (e.g., `customers.md`, `preferences.md`)
