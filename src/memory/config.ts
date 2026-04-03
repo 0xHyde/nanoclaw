@@ -40,7 +40,9 @@ export const MEMORY_LANCEDB_PATH =
   './data/memory/lancedb';
 
 export const MEMORY_EMBEDDING_PROVIDER =
-  process.env.MEMORY_EMBEDDING_PROVIDER || env.MEMORY_EMBEDDING_PROVIDER || 'openai-compatible';
+  process.env.MEMORY_EMBEDDING_PROVIDER ||
+  env.MEMORY_EMBEDDING_PROVIDER ||
+  'openai-compatible';
 
 export const MEMORY_EMBEDDING_API_KEY =
   process.env.MEMORY_EMBEDDING_API_KEY || env.MEMORY_EMBEDDING_API_KEY || '';
@@ -63,7 +65,8 @@ export const MEMORY_EMBEDDING_DIMENSIONS = parseInt(
 );
 
 export const MEMORY_EXTRACTION_ENABLED =
-  (process.env.MEMORY_EXTRACTION_ENABLED || env.MEMORY_EXTRACTION_ENABLED) === 'true';
+  (process.env.MEMORY_EXTRACTION_ENABLED || env.MEMORY_EXTRACTION_ENABLED) ===
+  'true';
 
 export const MEMORY_EXTRACTION_MODEL =
   process.env.MEMORY_EXTRACTION_MODEL ||
@@ -116,11 +119,15 @@ export const MEMORY_SCORE_MIN = parseFloat(
 );
 
 export const MEMORY_SCORE_HALFLIFE_DAYS = parseFloat(
-  process.env.MEMORY_SCORE_HALFLIFE_DAYS || env.MEMORY_SCORE_HALFLIFE_DAYS || '14',
+  process.env.MEMORY_SCORE_HALFLIFE_DAYS ||
+    env.MEMORY_SCORE_HALFLIFE_DAYS ||
+    '14',
 );
 
 export const MEMORY_CLEANUP_INTERVAL_MS = parseInt(
-  process.env.MEMORY_CLEANUP_INTERVAL_MS || env.MEMORY_CLEANUP_INTERVAL_MS || '3600000',
+  process.env.MEMORY_CLEANUP_INTERVAL_MS ||
+    env.MEMORY_CLEANUP_INTERVAL_MS ||
+    '3600000',
   10,
 );
 
@@ -134,21 +141,31 @@ export const MEMORY_DECAY_THRESHOLD = parseFloat(
 );
 
 export const MEMORY_CONSOLIDATION_ENABLED =
-  (process.env.MEMORY_CONSOLIDATION_ENABLED || env.MEMORY_CONSOLIDATION_ENABLED || 'true') === 'true';
+  (process.env.MEMORY_CONSOLIDATION_ENABLED ||
+    env.MEMORY_CONSOLIDATION_ENABLED ||
+    'true') === 'true';
 
 export const MEMORY_CONSOLIDATION_SIMILARITY = parseFloat(
-  process.env.MEMORY_CONSOLIDATION_SIMILARITY || env.MEMORY_CONSOLIDATION_SIMILARITY || '0.82',
+  process.env.MEMORY_CONSOLIDATION_SIMILARITY ||
+    env.MEMORY_CONSOLIDATION_SIMILARITY ||
+    '0.82',
 );
 
 export const MEMORY_CONSOLIDATION_MIN_CLUSTER = parseInt(
-  process.env.MEMORY_CONSOLIDATION_MIN_CLUSTER || env.MEMORY_CONSOLIDATION_MIN_CLUSTER || '3',
+  process.env.MEMORY_CONSOLIDATION_MIN_CLUSTER ||
+    env.MEMORY_CONSOLIDATION_MIN_CLUSTER ||
+    '3',
   10,
 );
 
 export const MEMORY_REINFORCEMENT_FACTOR = parseFloat(
-  process.env.MEMORY_REINFORCEMENT_FACTOR || env.MEMORY_REINFORCEMENT_FACTOR || '0.5',
+  process.env.MEMORY_REINFORCEMENT_FACTOR ||
+    env.MEMORY_REINFORCEMENT_FACTOR ||
+    '0.5',
 );
 
 export const MEMORY_MAX_HALF_LIFE_MULTIPLIER = parseFloat(
-  process.env.MEMORY_MAX_HALF_LIFE_MULTIPLIER || env.MEMORY_MAX_HALF_LIFE_MULTIPLIER || '3',
+  process.env.MEMORY_MAX_HALF_LIFE_MULTIPLIER ||
+    env.MEMORY_MAX_HALF_LIFE_MULTIPLIER ||
+    '3',
 );

@@ -443,7 +443,10 @@ export class FeishuChannel implements Channel {
     // Otherwise try localized formats
     const lang = parsed.content
       ? parsed
-      : parsed.zh_cn || parsed.en_us || parsed.ja_jp || Object.values(parsed)[0];
+      : parsed.zh_cn ||
+        parsed.en_us ||
+        parsed.ja_jp ||
+        Object.values(parsed)[0];
     if (!lang || typeof lang !== 'object') return '[Post]';
     const parts: string[] = [];
     if (lang.title) parts.push(lang.title);

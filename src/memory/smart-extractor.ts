@@ -8,7 +8,13 @@ import { logger } from '../logger.js';
 
 export interface ExtractedMemory {
   content: string;
-  kind: 'profile' | 'preferences' | 'entities' | 'events' | 'cases' | 'patterns';
+  kind:
+    | 'profile'
+    | 'preferences'
+    | 'entities'
+    | 'events'
+    | 'cases'
+    | 'patterns';
   importance: number;
 }
 
@@ -37,7 +43,10 @@ Example output:
 ]`;
 
 function isOllamaEndpoint(): boolean {
-  return MEMORY_EXTRACTION_BASEURL.includes(':11434') || MEMORY_EXTRACTION_BASEURL.includes('/api/');
+  return (
+    MEMORY_EXTRACTION_BASEURL.includes(':11434') ||
+    MEMORY_EXTRACTION_BASEURL.includes('/api/')
+  );
 }
 
 async function callOllamaExtraction(
@@ -89,7 +98,9 @@ async function callOpenAICompatibleExtraction(
     response_format: { type: 'json_object' as const },
   };
 
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
   if (MEMORY_EMBEDDING_API_KEY) {
     headers['Authorization'] = `Bearer ${MEMORY_EMBEDDING_API_KEY}`;
   }
@@ -122,14 +133,20 @@ export async function extractMemories(
 
     const raw = isOllamaEndpoint()
       ? await callOllamaExtraction(conversationText, controller.signal)
-      : await callOpenAICompatibleExtraction(conversationText, controller.signal);
+      : await callOpenAICompatibleExtraction(
+          conversationText,
+          controller.signal,
+        );
 
     clearTimeout(timeout);
 
     if (!raw) return [];
 
     // Remove possible markdown code block wrapper
-    const cleaned = raw.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
+    const cleaned = raw
+      .replace(/^```json\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
     if (!cleaned) return [];
 
     // OpenAI response_format=json_object sometimes wraps array in {"memories": [...]}
@@ -137,7 +154,10 @@ export async function extractMemories(
     try {
       parsed = JSON.parse(cleaned);
     } catch {
-      logger.warn({ raw: cleaned.slice(0, 200) }, 'Extraction output is not valid JSON');
+      logger.warn(
+        { raw: cleaned.slice(0, 200) },
+        'Extraction output is not valid JSON',
+      );
       return [];
     }
 
@@ -160,7 +180,10 @@ export async function extractMemories(
     }
 
     if (!Array.isArray(items)) {
-      logger.warn({ raw: cleaned.slice(0, 200) }, 'Extraction output is not an array');
+      logger.warn(
+        { raw: cleaned.slice(0, 200) },
+        'Extraction output is not an array',
+      );
       return [];
     }
 
@@ -168,7 +191,8 @@ export async function extractMemories(
     for (const rawItem of items) {
       const item = rawItem as Record<string, unknown> | null;
       if (!item || typeof item !== 'object') continue;
-      if (typeof item.content !== 'string' || typeof item.kind !== 'string') continue;
+      if (typeof item.content !== 'string' || typeof item.kind !== 'string')
+        continue;
 
       const content = item.content.trim();
       const kind = item.kind;
@@ -188,7 +212,11 @@ export async function extractMemories(
       ];
       if (!validKinds.includes(kind as ExtractedMemory['kind'])) continue;
 
-      results.push({ content, kind: kind as ExtractedMemory['kind'], importance });
+      results.push({
+        content,
+        kind: kind as ExtractedMemory['kind'],
+        importance,
+      });
     }
 
     logger.info({ count: results.length }, 'Extracted memories');

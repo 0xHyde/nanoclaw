@@ -53,7 +53,9 @@ async function callOllamaConsolidation(
   });
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`Ollama consolidation error ${response.status}: ${errText}`);
+    throw new Error(
+      `Ollama consolidation error ${response.status}: ${errText}`,
+    );
   }
   const data = (await response.json()) as { response?: string };
   return data.response?.trim() || '';

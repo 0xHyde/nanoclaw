@@ -50,10 +50,16 @@ export async function initStore(): Promise<void> {
   } else {
     table = await db.openTable('memories');
     const schema = await table.schema();
-    const hasKind = schema.fields.some((f: { name: string }) => f.name === 'kind');
-    const hasMetadataJson = schema.fields.some((f: { name: string }) => f.name === 'metadata_json');
+    const hasKind = schema.fields.some(
+      (f: { name: string }) => f.name === 'kind',
+    );
+    const hasMetadataJson = schema.fields.some(
+      (f: { name: string }) => f.name === 'metadata_json',
+    );
     if (!hasKind || !hasMetadataJson) {
-      logger.info('Migrating LanceDB memories table: rebuilding with kind/metadata_json columns');
+      logger.info(
+        'Migrating LanceDB memories table: rebuilding with kind/metadata_json columns',
+      );
       const oldRows = await table.query().toArray();
       await db.dropTable('memories');
       const dummy: MemoryRecord = {
@@ -75,7 +81,11 @@ export async function initStore(): Promise<void> {
           const raw = r as Record<string, unknown>;
           const existingMetadata = (() => {
             if (raw.metadata_json && typeof raw.metadata_json === 'string') {
-              try { return JSON.parse(raw.metadata_json); } catch { return {}; }
+              try {
+                return JSON.parse(raw.metadata_json);
+              } catch {
+                return {};
+              }
             }
             if (raw.metadata && typeof raw.metadata === 'object') {
               return raw.metadata as Record<string, unknown>;
@@ -104,7 +114,9 @@ export async function initStore(): Promise<void> {
   if (MEMORY_HYBRID_ENABLED && table) {
     try {
       const indices = await table.listIndices();
-      const hasFts = indices.some((idx) => idx.name.toLowerCase().includes('fts'));
+      const hasFts = indices.some((idx) =>
+        idx.name.toLowerCase().includes('fts'),
+      );
       if (!hasFts) {
         logger.info('Creating LanceDB FTS index on content');
         await table.createIndex('content', {
@@ -125,9 +137,7 @@ export async function initStore(): Promise<void> {
   logger.info('LanceDB memory store initialized');
 }
 
-export async function addMemories(
-  records: MemoryRecord[],
-): Promise<void> {
+export async function addMemories(records: MemoryRecord[]): Promise<void> {
   if (!table) throw new Error('Memory store not initialized');
   if (records.length === 0) return;
   await table.add(records);
@@ -167,7 +177,9 @@ export async function searchMemories(
       .toArray();
     for (const row of rows) {
       const raw = row as unknown as MemoryRecord;
-      const vec = raw.vector ? Array.from(raw.vector as Iterable<number>) : undefined;
+      const vec = raw.vector
+        ? Array.from(raw.vector as Iterable<number>)
+        : undefined;
       allResults.push({ ...(raw as unknown as SearchResult), vector: vec });
     }
   }
@@ -200,7 +212,9 @@ async function searchMemoriesFts(
       .toArray();
     for (const row of rows) {
       const raw = row as unknown as MemoryRecord;
-      const vec = raw.vector ? Array.from(raw.vector as Iterable<number>) : undefined;
+      const vec = raw.vector
+        ? Array.from(raw.vector as Iterable<number>)
+        : undefined;
       allResults.push({ ...(raw as unknown as FtsSearchResult), vector: vec });
     }
   }

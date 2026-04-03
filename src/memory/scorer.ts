@@ -18,7 +18,10 @@ function calculateEffectiveHalfLife(
 ): number {
   const daysSinceAccess = (Date.now() - lastAccessedAt) / (1000 * 60 * 60 * 24);
   const maxMultiplier = MEMORY_MAX_HALF_LIFE_MULTIPLIER;
-  const reinforcement = Math.min(accessCount * MEMORY_REINFORCEMENT_FACTOR, maxMultiplier - 1);
+  const reinforcement = Math.min(
+    accessCount * MEMORY_REINFORCEMENT_FACTOR,
+    maxMultiplier - 1,
+  );
   const recencyFactor = Math.exp(-daysSinceAccess / 7);
   return baseHalfLife * (1 + reinforcement * recencyFactor);
 }
@@ -32,11 +35,23 @@ function parseMetadata(metadataJson?: string): Record<string, unknown> {
   }
 }
 
-function calculateRecencyBoost(timestamp: number, halfLifeDays: number, metadataJson?: string): number {
+function calculateRecencyBoost(
+  timestamp: number,
+  halfLifeDays: number,
+  metadataJson?: string,
+): number {
   const metadata = parseMetadata(metadataJson);
-  const accessCount = typeof metadata.access_count === 'number' ? metadata.access_count : 0;
-  const lastAccessedAt = typeof metadata.last_accessed_at === 'number' ? metadata.last_accessed_at : timestamp;
-  const effectiveHL = calculateEffectiveHalfLife(halfLifeDays, accessCount, lastAccessedAt);
+  const accessCount =
+    typeof metadata.access_count === 'number' ? metadata.access_count : 0;
+  const lastAccessedAt =
+    typeof metadata.last_accessed_at === 'number'
+      ? metadata.last_accessed_at
+      : timestamp;
+  const effectiveHL = calculateEffectiveHalfLife(
+    halfLifeDays,
+    accessCount,
+    lastAccessedAt,
+  );
   const ageDays = (Date.now() - timestamp) / (1000 * 60 * 60 * 24);
   return Math.exp(-ageDays / effectiveHL) * 0.1;
 }
@@ -83,15 +98,24 @@ export function scorePipeline(
       base = base * 0.5 + vectorScore * 0.5;
     }
 
-    const recency = calculateRecencyBoost(r.timestamp, halfLife, r.metadata_json);
+    const recency = calculateRecencyBoost(
+      r.timestamp,
+      halfLife,
+      r.metadata_json,
+    );
     const importanceWeight = 0.7 + 0.3 * (r.importance ?? 0.5);
     const lengthNorm = calculateLengthNormalization(r.content);
     const kindBoost =
-      preferredKinds && preferredKinds.length > 0 && preferredKinds.includes(String(r.kind || ''))
+      preferredKinds &&
+      preferredKinds.length > 0 &&
+      preferredKinds.includes(String(r.kind || ''))
         ? 0.05
         : 0;
 
-    const finalScore = Math.max(0, (base + recency + kindBoost) * importanceWeight * lengthNorm);
+    const finalScore = Math.max(
+      0,
+      (base + recency + kindBoost) * importanceWeight * lengthNorm,
+    );
 
     if (finalScore < hardMinScore) continue;
 
@@ -106,8 +130,12 @@ export function scorePipeline(
   for (const candidate of scored) {
     const tooSimilar = selected.some((kept) => {
       if (!candidate.vector || !kept.vector) return false;
-      const a = Array.isArray(candidate.vector) ? candidate.vector : Array.from(candidate.vector as Iterable<number>);
-      const b = Array.isArray(kept.vector) ? kept.vector : Array.from(kept.vector as Iterable<number>);
+      const a = Array.isArray(candidate.vector)
+        ? candidate.vector
+        : Array.from(candidate.vector as Iterable<number>);
+      const b = Array.isArray(kept.vector)
+        ? kept.vector
+        : Array.from(kept.vector as Iterable<number>);
       const sim = cosineSimilarity(a, b);
       return sim > 0.85;
     });

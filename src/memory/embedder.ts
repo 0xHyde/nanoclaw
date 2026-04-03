@@ -62,7 +62,10 @@ export async function embed(text: string): Promise<number[]> {
     }
     return await embedOpenAI(trimmed);
   } catch (err) {
-    logger.error({ err, provider: MEMORY_EMBEDDING_PROVIDER }, 'Embedding request failed');
+    logger.error(
+      { err, provider: MEMORY_EMBEDDING_PROVIDER },
+      'Embedding request failed',
+    );
     throw err;
   }
 }

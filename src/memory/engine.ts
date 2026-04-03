@@ -56,11 +56,36 @@ function shouldSkipRecall(query: string): boolean {
 function detectQueryKinds(query: string): string[] {
   const lower = query.toLowerCase();
   const kinds: string[] = [];
-  if (/\b(who am i|my name|i am a|profession|job|work as|developer|engineer|designer|manager|我是|我叫|职业|工作|身份)\b/i.test(query)) kinds.push('profile');
-  if (/\b(prefer|like|dislike|hate|love|want|favorite|style|喜欢|讨厌|偏好|想要|习惯|不爱)\b/i.test(query)) kinds.push('preferences');
-  if (/\b(when|deadline|schedule|trip|event|launch|appointment|date|什么时候|时间|日程|会议|旅行|出发|到期)\b/i.test(query)) kinds.push('events');
-  if (/\b(script|code|fix|bug|solution|solve|error|how to|pattern|workflow|怎么|解决|报错|代码|脚本|方案|流程)\b/i.test(query)) kinds.push('cases', 'patterns');
-  if (/\b(project|company|product|pet|dog|cat|team|name is|called|项目|公司|产品|团队|宠物)\b/i.test(query)) kinds.push('entities');
+  if (
+    /\b(who am i|my name|i am a|profession|job|work as|developer|engineer|designer|manager|我是|我叫|职业|工作|身份)\b/i.test(
+      query,
+    )
+  )
+    kinds.push('profile');
+  if (
+    /\b(prefer|like|dislike|hate|love|want|favorite|style|喜欢|讨厌|偏好|想要|习惯|不爱)\b/i.test(
+      query,
+    )
+  )
+    kinds.push('preferences');
+  if (
+    /\b(when|deadline|schedule|trip|event|launch|appointment|date|什么时候|时间|日程|会议|旅行|出发|到期)\b/i.test(
+      query,
+    )
+  )
+    kinds.push('events');
+  if (
+    /\b(script|code|fix|bug|solution|solve|error|how to|pattern|workflow|怎么|解决|报错|代码|脚本|方案|流程)\b/i.test(
+      query,
+    )
+  )
+    kinds.push('cases', 'patterns');
+  if (
+    /\b(project|company|product|pet|dog|cat|team|name is|called|项目|公司|产品|团队|宠物)\b/i.test(
+      query,
+    )
+  )
+    kinds.push('entities');
   return kinds;
 }
 
@@ -86,7 +111,11 @@ async function doRecall(
     : await searchMemories(vector, scopes, candidateLimit);
 
   logger.debug(
-    { candidates: candidates.length, scopes: scopes.length, hybrid: MEMORY_HYBRID_ENABLED },
+    {
+      candidates: candidates.length,
+      scopes: scopes.length,
+      hybrid: MEMORY_HYBRID_ENABLED,
+    },
     'Memory candidates fetched',
   );
 
@@ -111,10 +140,21 @@ export async function recallDetails(
     const vector = await embed(query);
     const scopes = buildScopes(groupFolder);
     const preferredKinds = detectQueryKinds(query);
-    const results = await doRecall(query, vector, scopes, MEMORY_RECALL_LIMIT, preferredKinds);
+    const results = await doRecall(
+      query,
+      vector,
+      scopes,
+      MEMORY_RECALL_LIMIT,
+      preferredKinds,
+    );
     const text = formatMemories(results);
     logger.info(
-      { count: results.length, groupFolder, hybrid: MEMORY_HYBRID_ENABLED, preferredKinds },
+      {
+        count: results.length,
+        groupFolder,
+        hybrid: MEMORY_HYBRID_ENABLED,
+        preferredKinds,
+      },
       text ? 'Recalled memories' : 'No memories passed scoring',
     );
     return { text, ids: results.map((r) => r.id) };
@@ -160,14 +200,22 @@ async function dedupAndStore(
 
       let existingId: string | null = null;
       for (const s of similar) {
-        const sim = cosineSimilarity(vector, (s as unknown as { vector: number[] }).vector || []);
+        const sim = cosineSimilarity(
+          vector,
+          (s as unknown as { vector: number[] }).vector || [],
+        );
         if (sim >= 0.88) {
           existingId = s.id;
           break;
         }
       }
 
-      if (existingId && (item.kind === 'profile' || item.kind === 'preferences' || item.kind === 'entities')) {
+      if (
+        existingId &&
+        (item.kind === 'profile' ||
+          item.kind === 'preferences' ||
+          item.kind === 'entities')
+      ) {
         await deleteMemoryById(existingId);
       }
 
@@ -185,7 +233,10 @@ async function dedupAndStore(
           vector,
         } as any,
       ]);
-      logger.debug({ id, groupFolder, kind: item.kind }, 'Stored extracted memory');
+      logger.debug(
+        { id, groupFolder, kind: item.kind },
+        'Stored extracted memory',
+      );
     } catch (err) {
       logger.warn({ err, item }, 'Dedup/store failed for extracted memory');
     }
@@ -290,7 +341,9 @@ export async function storeMemory(
     }
   }
 
-  const existing = existingId ? await getMemoryById(existingId).catch(() => null) : null;
+  const existing = existingId
+    ? await getMemoryById(existingId).catch(() => null)
+    : null;
   const id = existingId || crypto.randomUUID();
   if (existingId) {
     await deleteMemoryById(existingId);
@@ -352,12 +405,22 @@ export async function boostMemories(ids: string[]): Promise<void> {
       if (!mem) continue;
       const newImportance = Math.min(1, mem.importance + 0.05);
       const metadata = (() => {
-        if (typeof mem.metadata_json === 'string' && mem.metadata_json.length > 0) {
-          try { return JSON.parse(mem.metadata_json) as Record<string, unknown>; } catch { return {}; }
+        if (
+          typeof mem.metadata_json === 'string' &&
+          mem.metadata_json.length > 0
+        ) {
+          try {
+            return JSON.parse(mem.metadata_json) as Record<string, unknown>;
+          } catch {
+            return {};
+          }
         }
         return {};
       })();
-      const accessCount = (typeof metadata.access_count === 'number' ? metadata.access_count : 0) + 1;
+      const accessCount =
+        (typeof metadata.access_count === 'number'
+          ? metadata.access_count
+          : 0) + 1;
       metadata.access_count = accessCount;
       metadata.last_accessed_at = Date.now();
       await deleteMemoryById(id);
@@ -375,7 +438,10 @@ export async function boostMemories(ids: string[]): Promise<void> {
           vector: mem.vector,
         } as any,
       ]);
-      logger.debug({ id, newImportance, accessCount }, 'Boosted memory importance and access');
+      logger.debug(
+        { id, newImportance, accessCount },
+        'Boosted memory importance and access',
+      );
     } catch (err) {
       logger.warn({ err, id }, 'Failed to boost memory importance');
     }
