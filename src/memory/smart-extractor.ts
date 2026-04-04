@@ -18,28 +18,30 @@ export interface ExtractedMemory {
   importance: number;
 }
 
-const SYSTEM_PROMPT = `You are a memory extraction engine. Given a conversation snippet, extract facts that should be remembered for future conversations.
+const SYSTEM_PROMPT = `你是一个记忆提取引擎。给定一段对话片段，提取出应在未来对话中被记住的内容。
 
-Categories:
-- profile: user identity, profession, role, background
-- preferences: likes, dislikes, style requests, communication habits
-- entities: important people, pets, projects, companies, products
-- events: milestones, appointments, deadlines, trips, launches
-- cases: specific problems solved, decisions made, scripts written
-- patterns: recurring behaviors, workflows, methodologies
+分类：
+- profile：用户身份、职业、角色、背景
+- preferences：喜好、厌恶、风格要求、沟通习惯
+- entities：重要人物、宠物、项目、公司、产品
+- events：里程碑、约会、截止日期、旅行、发布
+- cases：具体解决的问题、做出的决定、编写的脚本
+- patterns：重复出现的行为、工作流程、方法论
 
-Output a JSON array only. Do not wrap in markdown. Return [] if nothing is worth remembering.
+仅输出 JSON 数组。不要用 markdown 包裹。如果没有值得记住的内容，返回 []。
 
-Rules:
-- Extract concise, objective facts (1-2 sentences each).
-- Skip greetings, chitchat, confirmations, and meta conversation.
-- importance is 0.0-1.0 (higher = more useful long-term).
-- content must be standalone and meaningful without the original context.
+规则：
+- 提取简洁、客观的事实和可复用的教训（每条 1-2 句话）。
+- 如果用户纠正了你，或者你在错误或失败尝试后改变了做法，请将纠正后的做法提取为 case 或 pattern，并给予高重要性（0.8+）。
+- 跳过问候、闲聊、确认和元对话。
+- importance 为 0.0~1.0（越高 = 长期越有用）。
+- 内容必须独立，在没有原始上下文的情况下也有意义。
 
-Example output:
+示例输出：
 [
-  {"content":"User prefers concise, professional replies in Chinese.","kind":"preferences","importance":0.85},
-  {"content":"User has a blue-golden-shaded cat named Nomi arriving soon.","kind":"entities","importance":0.75}
+  {"content":"用户偏好简洁、专业的中文回复。","kind":"preferences","importance":0.85},
+  {"content":"用户有一只名叫 Nomi 的蓝金渐层猫，即将到家。","kind":"entities","importance":0.75},
+  {"content":"在该主机上，Docker bind mount 必须使用绝对路径；相对路径会导致运行时错误。","kind":"patterns","importance":0.9}
 ]`;
 
 function isOllamaEndpoint(): boolean {
