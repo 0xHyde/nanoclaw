@@ -320,6 +320,12 @@ async function buildContainerArgs(
   args.push('-e', `MEMORY_API_HOST=${MEMORY_HOST_GATEWAY}`);
   args.push('-e', `MEMORY_API_PORT=${MEMORY_API_PORT}`);
 
+  // Feishu credentials for container wiki tools
+  const feishuAppId = dotEnv.FEISHU_APP_ID || process.env.FEISHU_APP_ID;
+  const feishuAppSecret = dotEnv.FEISHU_APP_SECRET || process.env.FEISHU_APP_SECRET;
+  if (feishuAppId) args.push('-e', `FEISHU_APP_ID=${feishuAppId}`);
+  if (feishuAppSecret) args.push('-e', `FEISHU_APP_SECRET=${feishuAppSecret}`);
+
   for (const mount of mounts) {
     if (mount.readonly) {
       args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));

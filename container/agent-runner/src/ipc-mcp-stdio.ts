@@ -507,6 +507,282 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+const FEISHU_APP_ID = process.env.FEISHU_APP_ID || '';
+const FEISHU_APP_SECRET = process.env.FEISHU_APP_SECRET || '';
+
+async function getTenantAccessToken(): Promise<string | null> {
+  if (!FEISHU_APP_ID || !FEISHU_APP_SECRET) return null;
+  try {
+    const res = await fetch(
+      'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          app_id: FEISHU_APP_ID,
+          app_secret: FEISHU_APP_SECRET,
+        }),
+      },
+    );
+    const data = (await res.json()) as {
+      code: number;
+      tenant_access_token?: string;
+      msg?: string;
+    };
+    if (data.code !== 0 || !data.tenant_access_token) {
+      console.error(
+        `[feishu] get token failed: ${data.msg || JSON.stringify(data)}`,
+      );
+      return null;
+    }
+    return data.tenant_access_token;
+  } catch (err) {
+    console.error(
+      `[feishu] get token error: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
+  }
+}
+
+async function larkRequest(
+  method: 'GET' | 'POST',
+  path: string,
+  body?: unknown,
+  query?: Record<string, string | number | undefined>,
+): Promise<unknown> {
+  const token = await getTenantAccessToken();
+  if (!token) {
+    throw new Error(
+      'Feishu credentials not configured or token fetch failed',
+    );
+  }
+
+  let url = `https://open.feishu.cn${path}`;
+  if (query) {
+    const qs = Object.entries(query)
+      .filter(([, v]) => v !== undefined && v !== null)
+      .map(
+        ([k, v]) =>
+          `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`,
+      )
+      .join('&');
+    if (qs) url += `?${qs}`;
+  }
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  };
+
+  const res = await fetch(url, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { raw: text };
+  }
+
+  const code = (data as any)?.code ?? 0;
+  if (!res.ok || code !== 0) {
+    const msg = (data as any)?.msg || text.slice(0, 200);
+    throw new Error(`Feishu API error ${res.status} (code ${code}): ${msg}`);
+  }
+  return data;
+}
+
+server.tool(
+  'feishu_wiki_space',
+  'Manage Feishu wiki spaces. Actions: list, get, create.',
+  {
+    action: z.enum(['list', 'get', 'create']),
+    space_id: z.string().optional().describe('Required for get'),
+    name: z.string().optional().describe('Required for create'),
+    description: z.string().optional().describe('Optional for create'),
+    page_size: z.number().int().min(1).max(50).optional().describe('For list'),
+    page_token: z.string().optional().describe('For list pagination'),
+  },
+  async (args) => {
+    try {
+      let result: unknown;
+      switch (args.action) {
+        case 'list': {
+          result = await larkRequest('GET', '/open-apis/wiki/v2/spaces', undefined, {
+            page_size: args.page_size,
+            page_token: args.page_token,
+          });
+          break;
+        }
+        case 'get': {
+          if (!args.space_id) {
+            throw new Error('space_id is required for get');
+          }
+          result = await larkRequest(
+            'GET',
+            `/open-apis/wiki/v2/spaces/${args.space_id}`,
+          );
+          break;
+        }
+        case 'create': {
+          if (!args.name) {
+            throw new Error('name is required for create');
+          }
+          result = await larkRequest('POST', '/open-apis/wiki/v2/spaces', {
+            name: args.name,
+            description: args.description,
+          });
+          break;
+        }
+      }
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'feishu_wiki_space_node',
+  'Manage Feishu wiki space nodes. Actions: list, get, create, move, copy.',
+  {
+    action: z.enum(['list', 'get', 'create', 'move', 'copy']),
+    space_id: z.string().optional().describe('Required for list/create/move/copy'),
+    token: z.string().optional().describe('Required for get'),
+    node_token: z.string().optional().describe('Required for move/copy'),
+    obj_type: z
+      .enum(['docx', 'sheet', 'mindnote', 'bitable', 'file', 'slides'])
+      .optional()
+      .describe('Required for create'),
+    node_type: z
+      .enum(['origin', 'shortcut'])
+      .optional()
+      .describe('Required for create'),
+    parent_node_token: z.string().optional(),
+    origin_node_token: z.string().optional(),
+    title: z.string().optional(),
+    target_parent_token: z.string().optional().describe('For move/copy'),
+    target_space_id: z.string().optional().describe('For copy'),
+    page_size: z.number().int().min(1).optional(),
+    page_token: z.string().optional(),
+  },
+  async (args) => {
+    try {
+      let result: unknown;
+      switch (args.action) {
+        case 'list': {
+          if (!args.space_id) {
+            throw new Error('space_id is required for list');
+          }
+          result = await larkRequest(
+            'GET',
+            `/open-apis/wiki/v2/spaces/${args.space_id}/nodes`,
+            undefined,
+            {
+              parent_node_token: args.parent_node_token,
+              page_size: args.page_size,
+              page_token: args.page_token,
+            },
+          );
+          break;
+        }
+        case 'get': {
+          if (!args.token) {
+            throw new Error('token is required for get');
+          }
+          result = await larkRequest(
+            'GET',
+            '/open-apis/wiki/v2/spaces/get_node',
+            undefined,
+            { token: args.token, obj_type: args.obj_type || 'wiki' },
+          );
+          break;
+        }
+        case 'create': {
+          if (!args.space_id || !args.obj_type || !args.node_type) {
+            throw new Error('space_id, obj_type and node_type are required for create');
+          }
+          result = await larkRequest(
+            'POST',
+            `/open-apis/wiki/v2/spaces/${args.space_id}/nodes`,
+            {
+              obj_type: args.obj_type,
+              node_type: args.node_type,
+              parent_node_token: args.parent_node_token,
+              origin_node_token: args.origin_node_token,
+              title: args.title,
+            },
+          );
+          break;
+        }
+        case 'move': {
+          if (!args.space_id || !args.node_token) {
+            throw new Error('space_id and node_token are required for move');
+          }
+          result = await larkRequest(
+            'POST',
+            `/open-apis/wiki/v2/spaces/${args.space_id}/nodes/${args.node_token}/move`,
+            { target_parent_token: args.target_parent_token },
+          );
+          break;
+        }
+        case 'copy': {
+          if (!args.space_id || !args.node_token) {
+            throw new Error('space_id and node_token are required for copy');
+          }
+          result = await larkRequest(
+            'POST',
+            `/open-apis/wiki/v2/spaces/${args.space_id}/nodes/${args.node_token}/copy`,
+            {
+              target_space_id: args.target_space_id,
+              target_parent_token: args.target_parent_token,
+              title: args.title,
+            },
+          );
+          break;
+        }
+      }
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
